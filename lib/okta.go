@@ -1,6 +1,7 @@
 package lib
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -9,9 +10,14 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/pquerna/otp/totp"
 
 	"golang.org/x/net/publicsuffix"
 
@@ -20,6 +26,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sts"
+	homedir "github.com/mitchellh/go-homedir"
 	"github.com/segmentio/aws-okta/lib/mfa"
 	"github.com/segmentio/aws-okta/lib/saml"
 	log "github.com/sirupsen/logrus"
@@ -75,7 +82,7 @@ type OktaCreds struct {
 }
 
 type OktaCookies struct {
-	Session string
+	Session     string
 	DeviceToken string
 }
 
@@ -343,16 +350,58 @@ func (o *OktaClient) selectMFADevice() (*OktaUserAuthnFactor, error) {
 	return &factors[factorIdx], nil
 }
 
+func genTotp() (string, error) {
+	var token string
+
+	home, err := homedir.Dir()
+	if err != nil {
+		return "", err
+	}
+
+	tokensrcFile := filepath.Join(home, "/Vaults/Talend/tokens.secrets")
+	if fd, err := os.Open(tokensrcFile); err == nil {
+		defer fd.Close()
+		scanner := bufio.NewScanner(fd)
+		for scanner.Scan() {
+			text := scanner.Text()
+			matched, err := regexp.MatchString("^Okta", text)
+			if err != nil {
+				return "", err
+			}
+			if matched {
+				a := strings.Split(text, " ")
+				rootToken := a[len(a)-1]
+				token, err = totp.GenerateCode(rootToken, time.Now())
+				if err != nil {
+					return "", err
+				}
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		return "", err
+	}
+
+	return token, nil
+}
+
 func (o *OktaClient) preChallenge(oktaFactorId, oktaFactorType string) ([]byte, error) {
 	var mfaCode string
 	var err error
 
 	//Software and Hardware based OTP Tokens
 	if strings.Contains(oktaFactorType, "token") {
-		log.Debug("Token MFA")
-		mfaCode, err = Prompt("Enter MFA Code", false)
+		log.Debug("Trying autogenerating MFA Code")
+		mfaCode, err = genTotp()
 		if err != nil {
-			return nil, err
+			log.Debug("Token MFA autogeneration failed, fallback to prompt")
+			mfaCode, err = Prompt("Enter MFA Code", false)
+			if err != nil {
+				return nil, err
+			}
 		}
 	} else if strings.Contains(oktaFactorType, "sms") {
 		log.Debug("SMS MFA")
@@ -667,18 +716,18 @@ func (p *OktaProvider) Retrieve() (sts.Credentials, string, error) {
 	log.Debug("pOktaSessionCookieKey: ", p.OktaSessionCookieKey)
 
 	newCookieItem := keyring.Item{
-		Key:                         p.OktaSessionCookieKey,
-		Data:                        []byte(newCookies.Session),
-		Label:                       "okta session cookie",
+		Key:   p.OktaSessionCookieKey,
+		Data:  []byte(newCookies.Session),
+		Label: "okta session cookie",
 		KeychainNotTrustApplication: false,
 	}
 
 	p.Keyring.Set(newCookieItem)
 
 	newCookieItem2 := keyring.Item{
-		Key:                         "okta-device-token-cookie",
-		Data:                        []byte(newCookies.DeviceToken),
-		Label:                       "okta device token",
+		Key:   "okta-device-token-cookie",
+		Data:  []byte(newCookies.DeviceToken),
+		Label: "okta device token",
 		KeychainNotTrustApplication: false,
 	}
 
