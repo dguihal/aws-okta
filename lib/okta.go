@@ -1,7 +1,6 @@
 package lib
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -10,14 +9,10 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"os"
-	"path/filepath"
-	"regexp"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/pquerna/otp/totp"
 
 	"golang.org/x/net/publicsuffix"
 
@@ -26,7 +21,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sts"
-	homedir "github.com/mitchellh/go-homedir"
 	"github.com/segmentio/aws-okta/lib/mfa"
 	"github.com/segmentio/aws-okta/lib/saml"
 	log "github.com/sirupsen/logrus"
@@ -66,6 +60,7 @@ type MFAConfig struct {
 	Provider   string // Which MFA provider to use when presented with an MFA challenge
 	FactorType string // Which of the factor types of the MFA provider to use
 	DuoDevice  string // Which DUO device to use for DUO MFA
+	OTPCommand string // Which command to use for MFA
 }
 
 type SAMLAssertion struct {
@@ -350,52 +345,24 @@ func (o *OktaClient) selectMFADevice() (*OktaUserAuthnFactor, error) {
 	return &factors[factorIdx], nil
 }
 
-func genTotp() (string, error) {
-	var token string
-
-	home, err := homedir.Dir()
-	if err != nil {
-		return "", err
-	}
-
-	tokensrcFile := filepath.Join(home, "/Vaults/Talend/tokens.secrets")
-	if fd, err := os.Open(tokensrcFile); err == nil {
-		defer fd.Close()
-		scanner := bufio.NewScanner(fd)
-		for scanner.Scan() {
-			text := scanner.Text()
-			matched, err := regexp.MatchString("^Okta", text)
-			if err != nil {
-				return "", err
-			}
-			if matched {
-				a := strings.Split(text, " ")
-				rootToken := a[len(a)-1]
-				token, err = totp.GenerateCode(rootToken, time.Now())
-				if err != nil {
-					return "", err
-				}
-			}
-		}
-
-		if err := scanner.Err(); err != nil {
-			log.Fatal(err)
-		}
-	} else {
-		return "", err
-	}
-
-	return token, nil
-}
-
 func (o *OktaClient) preChallenge(oktaFactorId, oktaFactorType string) ([]byte, error) {
 	var mfaCode string
 	var err error
 
 	//Software and Hardware based OTP Tokens
 	if strings.Contains(oktaFactorType, "token") {
-		log.Debug("Trying autogenerating MFA Code")
-		mfaCode, err = genTotp()
+		if o.MFAConfig.OTPCommand != "" {
+			log.Debug("Trying autogenerating MFA Code")
+			cmd := exec.Command(o.MFAConfig.OTPCommand)
+			var out bytes.Buffer
+			cmd.Stdout = &out
+			err := cmd.Run()
+			if err != nil {
+				log.Errorf("Token MFA autogeneration failed: %q", out.String())
+			} else {
+				mfaCode = out.String()
+			}
+		}
 		if err != nil {
 			log.Debug("Token MFA autogeneration failed, fallback to prompt")
 			mfaCode, err = Prompt("Enter MFA Code", false)
