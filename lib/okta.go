@@ -353,14 +353,15 @@ func (o *OktaClient) preChallenge(oktaFactorId, oktaFactorType string) ([]byte, 
 	if strings.Contains(oktaFactorType, "token") {
 		if o.MFAConfig.OTPCommand != "" {
 			log.Debug("Trying autogenerating MFA Code")
-			cmd := exec.Command(o.MFAConfig.OTPCommand)
+			cmdArr := strings.Split(o.MFAConfig.OTPCommand, " ")
+			cmd := exec.Command(cmdArr[0], cmdArr[1:]...)
 			var out bytes.Buffer
 			cmd.Stdout = &out
 			err := cmd.Run()
 			if err != nil {
-				log.Errorf("Token MFA autogeneration failed: %q", out.String())
+				log.Errorf("Token MFA autogeneration failed: %q", err.Error())
 			} else {
-				mfaCode = out.String()
+				mfaCode = strings.TrimSpace(out.String())
 			}
 		}
 		if err != nil {
@@ -683,18 +684,18 @@ func (p *OktaProvider) Retrieve() (sts.Credentials, string, error) {
 	log.Debug("pOktaSessionCookieKey: ", p.OktaSessionCookieKey)
 
 	newCookieItem := keyring.Item{
-		Key:   p.OktaSessionCookieKey,
-		Data:  []byte(newCookies.Session),
-		Label: "okta session cookie",
+		Key:                         p.OktaSessionCookieKey,
+		Data:                        []byte(newCookies.Session),
+		Label:                       "okta session cookie",
 		KeychainNotTrustApplication: false,
 	}
 
 	p.Keyring.Set(newCookieItem)
 
 	newCookieItem2 := keyring.Item{
-		Key:   "okta-device-token-cookie",
-		Data:  []byte(newCookies.DeviceToken),
-		Label: "okta device token",
+		Key:                         "okta-device-token-cookie",
+		Data:                        []byte(newCookies.DeviceToken),
+		Label:                       "okta device token",
 		KeychainNotTrustApplication: false,
 	}
 
