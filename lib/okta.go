@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -59,6 +60,7 @@ type MFAConfig struct {
 	Provider   string // Which MFA provider to use when presented with an MFA challenge
 	FactorType string // Which of the factor types of the MFA provider to use
 	DuoDevice  string // Which DUO device to use for DUO MFA
+	OTPCommand string // Which command to use for MFA
 }
 
 type SAMLAssertion struct {
@@ -75,7 +77,7 @@ type OktaCreds struct {
 }
 
 type OktaCookies struct {
-	Session string
+	Session     string
 	DeviceToken string
 }
 
@@ -349,10 +351,25 @@ func (o *OktaClient) preChallenge(oktaFactorId, oktaFactorType string) ([]byte, 
 
 	//Software and Hardware based OTP Tokens
 	if strings.Contains(oktaFactorType, "token") {
-		log.Debug("Token MFA")
-		mfaCode, err = Prompt("Enter MFA Code", false)
+		if o.MFAConfig.OTPCommand != "" {
+			log.Debug("Trying autogenerating MFA Code")
+			cmdArr := strings.Split(o.MFAConfig.OTPCommand, " ")
+			cmd := exec.Command(cmdArr[0], cmdArr[1:]...)
+			var out bytes.Buffer
+			cmd.Stdout = &out
+			err := cmd.Run()
+			if err != nil {
+				log.Errorf("Token MFA autogeneration failed: %q", err.Error())
+			} else {
+				mfaCode = strings.TrimSpace(out.String())
+			}
+		}
 		if err != nil {
-			return nil, err
+			log.Debug("Token MFA autogeneration failed, fallback to prompt")
+			mfaCode, err = Prompt("Enter MFA Code", false)
+			if err != nil {
+				return nil, err
+			}
 		}
 	} else if strings.Contains(oktaFactorType, "sms") {
 		log.Debug("SMS MFA")

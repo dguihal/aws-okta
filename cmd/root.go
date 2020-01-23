@@ -123,6 +123,7 @@ func init() {
 	}
 	RootCmd.PersistentFlags().StringVarP(&mfaConfig.Provider, "mfa-provider", "", "", "MFA Provider to use (eg DUO, OKTA, GOOGLE)")
 	RootCmd.PersistentFlags().StringVarP(&mfaConfig.FactorType, "mfa-factor-type", "", "", "MFA Factor Type to use (eg push, token:software:totp)")
+	RootCmd.PersistentFlags().StringVarP(&mfaConfig.OTPCommand, "mfa-otp-command", "", "", "MFA OTP Command to use (eg gopass otp mysecret)")
 	RootCmd.PersistentFlags().StringVarP(&mfaConfig.DuoDevice, "mfa-duo-device", "", "phone1", "Device to use phone1, phone2, u2f or token")
 	RootCmd.PersistentFlags().StringVarP(&backend, "backend", "b", "", fmt.Sprintf("Secret backend to use %s", backendsAvailable))
 	RootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "Enable debug logging")
@@ -159,6 +160,18 @@ func updateMfaConfig(cmd *cobra.Command, profiles lib.Profiles, profile string, 
 			mfaFactorType, _, err := profiles.GetValue(profile, "mfa_factor_type")
 			if err == nil {
 				config.FactorType = mfaFactorType
+			}
+		}
+	}
+
+	if !cmd.Flags().Lookup("mfa-otp-command").Changed {
+		mfaOTPCommand, ok := os.LookupEnv("AWS_OKTA_MFA_OTP_COMMAND")
+		if ok {
+			config.OTPCommand = mfaOTPCommand
+		} else {
+			mfaOTPCommand, _, err := profiles.GetValue(profile, "mfa_otp_command")
+			if err == nil {
+				config.FactorType = mfaOTPCommand
 			}
 		}
 	}
