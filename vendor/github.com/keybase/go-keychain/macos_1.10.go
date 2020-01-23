@@ -36,7 +36,7 @@ var (
 
 // createAccess creates a SecAccessRef as CFTypeRef.
 // The returned SecAccessRef, if non-nil, must be released via CFRelease.
-func createAccess(label string, trustedApplications []string) (C.CFTypeRef, error) {
+func createAccess(label string) (C.CFTypeRef, error) {
 	var err error
 	var labelRef C.CFStringRef
 	if labelRef, err = StringToCFString(label); err != nil {
@@ -45,26 +45,6 @@ func createAccess(label string, trustedApplications []string) (C.CFTypeRef, erro
 	defer C.CFRelease(C.CFTypeRef(labelRef))
 
 	var trustedApplicationsArray C.CFArrayRef
-	if trustedApplications != nil {
-		if len(trustedApplications) > 0 {
-			// Always prepend with empty string which signifies that we
-			// include a NULL application, which means ourselves.
-			trustedApplications = append([]string{""}, trustedApplications...)
-		}
-
-		var trustedApplicationsRefs []C.CFTypeRef
-		for _, trustedApplication := range trustedApplications {
-			trustedApplicationRef, createErr := createTrustedApplication(trustedApplication)
-			if createErr != nil {
-				return 0, createErr
-			}
-			defer C.CFRelease(C.CFTypeRef(trustedApplicationRef))
-			trustedApplicationsRefs = append(trustedApplicationsRefs, trustedApplicationRef)
-		}
-
-		trustedApplicationsArray = ArrayToCFArray(trustedApplicationsRefs)
-		defer C.CFRelease(C.CFTypeRef(trustedApplicationsArray))
-	}
 
 	var access C.SecAccessRef
 	errCode := C.SecAccessCreate(labelRef, trustedApplicationsArray, &access)
@@ -76,35 +56,15 @@ func createAccess(label string, trustedApplications []string) (C.CFTypeRef, erro
 	return C.CFTypeRef(access), nil
 }
 
-// createTrustedApplication creates a SecTrustedApplicationRef as a CFTypeRef.
-// The returned SecTrustedApplicationRef, if non-nil, must be released via CFRelease.
-func createTrustedApplication(trustedApplication string) (C.CFTypeRef, error) {
-	var trustedApplicationCStr *C.char
-	if trustedApplication != "" {
-		trustedApplicationCStr = C.CString(trustedApplication)
-		defer C.free(unsafe.Pointer(trustedApplicationCStr))
-	}
-
-	var trustedApplicationRef C.SecTrustedApplicationRef
-	errCode := C.SecTrustedApplicationCreateFromPath(trustedApplicationCStr, &trustedApplicationRef)
-	err := checkError(errCode)
-	if err != nil {
-		return 0, err
-	}
-
-	return C.CFTypeRef(trustedApplicationRef), nil
-}
-
 // Access defines whats applications can use the keychain item
 type Access struct {
-	Label               string
-	TrustedApplications []string
+	Label string
 }
 
 // Convert converts Access to CFTypeRef.
 // The returned CFTypeRef, if non-nil, must be released via CFRelease.
 func (a Access) Convert() (C.CFTypeRef, error) {
-	return createAccess(a.Label, a.TrustedApplications)
+	return createAccess(a.Label)
 }
 
 // SetAccess sets Access on Item
